@@ -16,12 +16,14 @@ pub fn find_conectric_router(ports: &[SerialPortInfo]) -> Option<String> {
     None
 }
 
+/**
+* This fuction open the serial port from a port name
+* and return a Box<dyn SerialPort> if it succesfully connected.
+*/
 pub fn open_serial_port(port_name: String) -> Result<Box<dyn SerialPort>, serialport::Error> {
-    let port = serialport::new(port_name.clone(), 230_400)
+    return serialport::new(port_name.clone(), 230_400)
     .timeout(Duration::from_millis(100))
     .open();
-
-    port
 }
 
 /**
@@ -44,10 +46,10 @@ pub fn initialize_conectric_router(port:&mut Box<dyn SerialPort>) {
 }
 
 pub fn process_data(data: &str) {
-
     if data.starts_with('>') {
         // TODO : Start processing and parsing the data here.
-        
+        println!("{}", &data[1..]);
+        // Create a link to the parser.rs to parse the data.
     } else if data.starts_with("MR:") {
 
         let mac_address = &data[3..];
@@ -75,7 +77,6 @@ pub fn process_data(data: &str) {
 }
 
 pub fn start_gateway() {
-    println!("Starting Conectric Gateway");
     let ports = serialport::available_ports().expect("No USB router found!");
     let serial_port_name = find_conectric_router(&ports).unwrap();
 
