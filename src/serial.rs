@@ -24,15 +24,22 @@ pub fn open_serial_port(port_name: String) -> Result<Box<dyn SerialPort>, serial
     port
 }
 
+/**
+* This fuction initialize the router to start listening into the sensors broadcasting messages
+* DP - Dump payload
+* VER - Gets version of contiki and conectric
+* MR - Gets the MAC Address of the router
+* SS - Switch the router to sink mode
+*/
 pub fn initialize_conectric_router(port:&mut Box<dyn SerialPort>) {
     println!("Connected to the serial port.");
-    sleep(Duration::from_millis(100));
+    sleep(Duration::from_millis(10));
     port.write(b"DP\n").expect("Write failed!");
-    sleep(Duration::from_millis(100));
+    sleep(Duration::from_millis(10));
     port.write(b"VER\n").expect("Write failed!");
-    sleep(Duration::from_millis(100));
+    sleep(Duration::from_millis(10));
     port.write(b"MR\n").expect("Write failed!");
-    sleep(Duration::from_millis(100));
+    sleep(Duration::from_millis(10));
     port.write(b"SS\n").expect("Write failed!");
 }
 
