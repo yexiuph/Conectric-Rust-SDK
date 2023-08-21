@@ -3,8 +3,11 @@ use std::{
     thread::sleep,
     time::Duration
 };
+use crate::{
+    parser::parse_data
+};
 
-pub fn find_conectric_router(ports: &[SerialPortInfo]) -> Option<String> {
+fn find_conectric_router(ports: &[SerialPortInfo]) -> Option<String> {
     for p in ports {
         if let SerialPortType::UsbPort(usb_info) = &p.port_type {
             match (usb_info.vid, usb_info.pid, usb_info.manufacturer.as_deref()) {
@@ -20,7 +23,7 @@ pub fn find_conectric_router(ports: &[SerialPortInfo]) -> Option<String> {
 * This fuction open the serial port from a port name
 * and return a Box<dyn SerialPort> if it succesfully connected.
 */
-pub fn open_serial_port(port_name: String) -> Result<Box<dyn SerialPort>, serialport::Error> {
+fn open_serial_port(port_name: String) -> Result<Box<dyn SerialPort>, serialport::Error> {
     return serialport::new(port_name.clone(), 230_400)
     .timeout(Duration::from_millis(100))
     .open();
@@ -33,7 +36,7 @@ pub fn open_serial_port(port_name: String) -> Result<Box<dyn SerialPort>, serial
 * MR - Gets the MAC Address of the router
 * SS - Switch the router to sink mode
 */
-pub fn initialize_conectric_router(port:&mut Box<dyn SerialPort>) {
+fn initialize_conectric_router(port:&mut Box<dyn SerialPort>) {
     println!("Connected to the serial port.");
     sleep(Duration::from_millis(10));
     port.write(b"DP\n").expect("Write failed!");
@@ -45,34 +48,19 @@ pub fn initialize_conectric_router(port:&mut Box<dyn SerialPort>) {
     port.write(b"SS\n").expect("Write failed!");
 }
 
-pub fn process_data(data: &str) {
+fn process_data(data: &str) {
     if data.starts_with('>') {
-        // TODO : Start processing and parsing the data here.
-        println!("{}", &data[1..]);
-        // Create a link to the parser.rs to parse the data.
+        parse_data(&data[1..]);
     } else if data.starts_with("MR:") {
-
-        let mac_address = &data[3..];
-        println!("MAC Address: {}", mac_address);
-
+        println!("MAC Address: {}", &data[3..]);
     } else if data.starts_with("DP:Ok") {
-
         println!("Switched to dump payload mode.");
-
     } else if data.starts_with("SS:Ok") {
-
         println!("Switched to sink mode.");
-
     } else if data.to_lowercase().starts_with("ver:contiki") {
-
-        let contiki_version = &data[12..];
-        println!("Contiki Version: {}", contiki_version);
-
+        println!("Contiki Version: {}", &data[12..]);
     } else if data.to_lowercase().starts_with("ver:conectric") {
-
-        let conectric_version = &data[14..];
-        println!("Conectric Version: {}", conectric_version);
-
+        println!("Conectric Version: {}", &data[14..]);
     }
 }
 
