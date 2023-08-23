@@ -1,10 +1,12 @@
+use crate::RoundTo;
+
 pub fn parse_data(payload : &str) {
     println!("Raw Data with CRC: {}", payload);
-    let payload = &payload[0..payload.len() - 4];
+    let payload: &str = &payload[0..payload.len() - 4];
     println!("Raw Data without CRC: {}", payload);
 
     // Start getting the details from the payload.
-    let header_data = get_data_details(payload);
+    let header_data : (i32, i32, i32, i32) = get_data_details(payload);
     println!("Header Details: {:?}", header_data);
 
     if header_data.2 != 0 && header_data.3 != 32 {
@@ -14,7 +16,9 @@ pub fn parse_data(payload : &str) {
 
     let readable_data = get_readable_data(header_data.1, payload);
     println!("Raw Readable Data: {:?}", readable_data);
-    
+    println!("Sensor Address: {}", readable_data.1);
+    println!("Battery Level: {:.2}%", readable_data.3);
+    println!("Sequence Since Power: {}", readable_data.2);
     // TODO : Add Caching System to prevent duplicates
     // -----------------------------------------------
 
@@ -43,14 +47,14 @@ fn create_payload(payload: (i32, &str, i32, f32, &str)) {
         println!("Adc In Raw: {:?}", adc_in_raw);
 
         if let Ok(temperature_raw) = i32::from_str_radix(temperature_raw, 16) {
-            let temperature = calculate_temperature(temperature_raw);
+            let temperature: f32 = calculate_temperature(temperature_raw);
             println!("Calculated Temperature: {:.2}°C", temperature);
         } else {
             println!("Error parsing temperature raw.");
         }
 
         if let Ok(humidity_raw) = i32::from_str_radix(humidity_raw, 16) {
-            let humidity = calculate_humidity(humidity_raw);
+            let humidity: f32 = calculate_humidity(humidity_raw);
             println!("Calculated Humidity: {:.2}%", humidity);
         } else {
             println!("Error parsing humidity raw.");
@@ -58,24 +62,12 @@ fn create_payload(payload: (i32, &str, i32, f32, &str)) {
     }
 }
 
-
-
-fn round(method: fn(f32) -> f32, number: f32, precision: i32) -> f32 {
-    let factor = 10_f32.powi(precision);
-    let abs_number = number.abs();
-    (method(abs_number * factor) / factor) * if number < 0.0 { -1.0 } else { 1.0 }
-}
-
-fn round_to(number: f32, precision: i32 ) -> f32 {
-    round(f32::round, number, precision)
-}
-
 fn calculate_humidity(humidity_raw: i32) -> f32 {
-    round_to(-6.0 + 125.0 * (humidity_raw as f32 / 65536.0), 2)
+    RoundTo::round_to(-6.0 + 125.0 * (humidity_raw as f32 / 65536.0), 2)
 }
  
 fn calculate_temperature(temp_raw: i32) -> f32 {
-   round_to(-46.85 + (temp_raw as f32 / 65536.0) * 175.72, 2)
+    RoundTo::round_to(-46.85 + (temp_raw as f32 / 65536.0) * 175.72, 2)
 }
 
 
