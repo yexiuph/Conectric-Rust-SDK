@@ -3,8 +3,9 @@ use std::{
     thread::sleep,
     time::Duration
 };
-use crate::parser::parse_data;
+use crate::parser::ConectricParser;
 
+// Struct Implementation for Calling
 pub struct ConectricSerial;
 
 impl ConectricSerial {
@@ -12,6 +13,10 @@ impl ConectricSerial {
         Self
     }
 
+    /**
+    * This fuction find a suitable conectric router plugged in into the device
+    * and return a Option<String>
+    */
     fn find_conectric_router(ports: &[SerialPortInfo]) -> Option<String> {
         for p in ports {
             if let SerialPortType::UsbPort(usb_info) = &p.port_type {
@@ -55,7 +60,7 @@ impl ConectricSerial {
     
     fn process_data(data: &str) {
         if data.starts_with('>') {
-            parse_data(&data[1..]);
+            ConectricParser::parse_data(&data[1..]);
         } else {
             match data {
                 s if s.starts_with("MR:") => println!("MAC Address: {}", &s[3..]),
@@ -116,10 +121,6 @@ impl ConectricSerial {
     
     }
 }
-
-
-
-
 
 #[cfg(test)]
 mod serial_tests {
