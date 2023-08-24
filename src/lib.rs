@@ -1,12 +1,11 @@
-pub mod serial;
 pub mod parser;
+pub mod serial;
 
 /**
  * Rust Implementation of RoundTo npm crate
  * @author - yexiuph
  */
-pub struct RoundTo {
-}
+pub struct RoundTo {}
 
 impl RoundTo {
     fn round(method: fn(f32) -> f32, number: f32, precision: i32) -> f32 {
