@@ -1,9 +1,9 @@
-use std::{fs, sync::Arc};
+use std::sync::Arc;
 
 use crate::RoundTo;
-use chrono::{format::StrftimeItems, Utc};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value, Number};
+use serde_json::{json, Number, Value};
 
 #[derive(Debug)]
 struct UnknownMessageTypeError;
@@ -24,9 +24,13 @@ struct ParsableData {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ParsedData {
+    #[serde(rename = "gatewayId")]
     pub gateway_id: String,
+    #[serde(rename = "sensorId")]
     pub sensor_id: String,
+    #[serde(rename = "sequenceNum")]
     pub sequence_number: i32,
+    #[serde(rename = "type")]
     pub sensor_type: String,
     pub timestamp: i64,
     pub payload: Value,
@@ -74,23 +78,7 @@ impl ConectricParser {
             timestamp: Utc::now().timestamp(),
         };
 
-        println!("JSON Output: {:?}", parsed_data);
-
-        // Format the timestamp as a string
-        let timestamp_formatted = Utc::now()
-            .format_with_items(StrftimeItems::new("%Y%m%d%H%M%S"))
-            .to_string();
-
-        // Generate the JSON filename using sensor_type and timestamp
-        let json_filename = format!("{}_{}.json", payload_ref.0, timestamp_formatted);
-
-        // Serialize the parsed_data to JSON
-        let json_data = serde_json::to_string_pretty(&parsed_data).unwrap();
-
-        // Write the JSON data to the file
-        if let Err(err) = fs::write(json_filename, json_data) {
-            eprintln!("Error writing JSON data to file: {}", err);
-        }
+        println!("JSON Output: {:#?}", parsed_data);
     }
 
     /**
@@ -133,12 +121,18 @@ impl ConectricParser {
         }
     }
 
-    fn calculate_humidity(humidity_raw: i32) -> f32 {
-        RoundTo::round_to(-6.0 + 125.0 * (humidity_raw as f32 / 65536.0), 2)
+    fn calculate_humidity(humidity_raw: i32) -> Number {
+        let calculated_humidity = -6.0 + 125.0 * (humidity_raw as f32 / 65536.0);
+        let formatted_humidity = format!("{:.2}", RoundTo::round_to(calculated_humidity, 2));
+        let humidity_value = formatted_humidity.parse::<f64>().unwrap();
+        Number::from_f64(humidity_value).unwrap()
     }
 
-    fn calculate_temperature(temp_raw: i32) -> f32 {
-        RoundTo::round_to(-46.85 + (temp_raw as f32 / 65536.0) * 175.72, 2)
+    fn calculate_temperature(temp_raw: i32) -> Number {
+        let calculated_temp = -46.85 + (temp_raw as f32 / 65536.0) * 175.72;
+        let formatted_temp = format!("{:.2}", RoundTo::round_to(calculated_temp, 2));
+        let temperature_value = formatted_temp.parse::<f64>().unwrap();
+        Number::from_f64(temperature_value).unwrap()
     }
 
     fn generate_string_message_type(message_type: i32) -> &'static str {
@@ -169,71 +163,233 @@ impl ConectricParser {
      * This function is responsible for creating a dynamic payload
      */
     fn create_payload(payload: ParsableData) -> (String, Value) {
+        if payload.battery_level != 0.0 && payload.battery_level.is_nan() == true {
+            return ("".to_string(), json!(""));
+        }
         let msg_type = Self::generate_string_message_type(payload.message_type_raw);
 
-        let mut json_payload = match msg_type {
-            "unknown" => json!({"unknown": "unknown"}),
-            "tempHumidity" => Self::create_th_payload(),
-            "tempHumidityAdc" => Self::create_thadc_payload(&payload.payload_data),
-            "boot" => Self::create_boot_payload(&payload.payload_data),
-            "keepAlive" => json!({}),
-            _ => json!({"null": "null"})
-        };
-        
         // Add battery here to the Value
         let formatted_battery = format!("{:.2}", payload.battery_level);
         let battery_number = formatted_battery.parse::<f64>().unwrap();
         let battery_value = Number::from_f64(battery_number).unwrap();
-        json_payload["battery"] = json!(battery_value);
-        
-        (
-            msg_type.to_string().to_string(),
-            json_payload,
-        )
 
-        // if msg_type == "tempHumidityAdc" {
-        //     let temperature_raw = &payload.4[10..14];
-        //     let humidity_raw = &payload.4[14..18];
-        //     let adc_max_raw = &payload.4[22..26];
-        //     let adc_in_raw = &payload.4[26..];
+        let json_payload = match msg_type {
+            "unknown" => json!({ "unknown": "unknown" }),
+            "tempHumidity" => {
+                let mut data = Self::create_th_payload(&payload.payload_data);
+                data["battery"] = json!(battery_value);
+                data
+            }
+            "tempHumidityAdc" => {
+                let mut data = Self::create_thadc_payload(&payload.payload_data);
+                data["battery"] = json!(battery_value);
+                data
+            }
+            "tempHumidityLight" => {
+                let lux = RoundTo::round_to(
+                    0.003
+                        * (i32::from_str_radix(&&payload.payload_data[26..], 16).unwrap() as f32)
+                            .powf(1.89 - (3.7 - payload.battery_level) / 25.0),
+                    0,
+                );
+                let mut data = Self::create_thlight_payload(lux, &payload.payload_data);
+                data["battery"] = json!(battery_value);
+                data
+            }
+            // Can be implemented upon request.
+            // "moisture" => {
 
-        //     println!(
-        //         "Event Count: {:?}",
-        //         
-        //     );
+            // }
+            "echoStatus" | "rs485Status" => {
+                let mut data = json!({});
+                if payload.payload_data.len() == 10 {
+                    data["eventCount"] =
+                        json!(i32::from_str_radix(&payload.payload_data[2..], 16).unwrap());
+                    data
+                } else {
+                    data
+                }
+            }
+            "motion" => {
+                if payload.payload_data.starts_with("20") {
+                    json!({
+                        "status": false,
+                        "battery": battery_value
+                    })
+                } else {
+                    let mut data = json!({
+                        "status": true,
+                        "battery": battery_value
+                    });
 
-        //     println!("Temperature Raw: {:?}", temperature_raw);
-        //     println!("Humidity Raw: {:?}", humidity_raw);
-        //     println!("Adc Max Raw: {:?}", adc_max_raw);
-        //     println!("Adc In Raw: {:?}", adc_in_raw);
+                    if payload.payload_data.len() == 10 {
+                        data["eventCount"] =
+                            json!(i32::from_str_radix(&payload.payload_data[2..], 16).unwrap());
+                        data
+                    } else {
+                        data
+                    }
+                }
+            }
+            "pulse" => {
+                if payload.payload_data.starts_with("20") {
+                    json!({
+                        "status": false,
+                        "battery": battery_value
+                    })
+                } else {
+                    let mut data = json!({
+                        "status": true,
+                        "battery": battery_value
+                    });
+                    if payload.payload_data.len() == 10 {
+                        data["eventCount"] =
+                            json!(i32::from_str_radix(&payload.payload_data[2..], 16).unwrap());
+                        data
+                    } else {
+                        data
+                    }
+                }
+            }
+            "switch" => {
+                let mut data = Self::create_switch_payload(&payload.payload_data);
+                data["battery"] = json!(battery_value);
+                data
+            }
+            "keepAlive" => json!({ "battery": battery_value }),
+            "boot" => {
+                let mut data = Self::create_boot_payload(&payload.payload_data);
+                data["battery"] = json!(battery_value);
+                data
+            }
+            "rs485Config" => Self::create_rsconfig_payload(&payload.payload_data),
+            "rs485Request" => json!({"data": &payload.payload_data}),
+            "rs485Response" => Self::rs485_response_payload(&payload.payload_data),
+            "rs485ChunkEnvelopResponse" => json!({
+                "battery" : battery_value,
+                "numChunks" : i32::from_str_radix(&payload.payload_data[0..2], 16).unwrap(),
+                "chunkSize" : i32::from_str_radix(&payload.payload_data[2..], 16).unwrap(),
+            }),
+            "rs485ChunkResponse" | "text" => json!({
+                "battery" : battery_value,
+                "data": &payload.payload_data,
+            }),
 
-        //     if let Ok(temperature_raw) = i32::from_str_radix(temperature_raw, 16) {
-        //         let temperature: f32 = Self::calculate_temperature(temperature_raw);
-        //         println!("Calculated Temperature: {:.2}°C", temperature);
-        //     } else {
-        //         println!("Error parsing temperature raw.");
-        //     }
+            _ => json!({ "null": "null" }),
+        };
 
-        //     if let Ok(humidity_raw) = i32::from_str_radix(humidity_raw, 16) {
-        //         let humidity: f32 = Self::calculate_humidity(humidity_raw);
-        //         println!("Calculated Humidity: {:.2}%", humidity);
-        //     } else {
-        //         println!("Error parsing humidity raw.");
-        //     }
+        (msg_type.to_string().to_string(), json_payload)
     }
 
-    fn create_th_payload() -> Value {
-        return json!({});
+    fn create_thlight_payload(lux: f32, payload: &str) -> Value {
+        let bucketed_lux = ((lux / 100.0).round()).min(15.0);
+        json!({
+            "eventCount": i32::from_str_radix(&payload[2..10], 16).unwrap_or(0),
+            "temperature": Self::calculate_temperature(i32::from_str_radix(&payload[10..14], 16).unwrap_or(0)),
+            "temperatureUnit": "C",
+            "humidity": Self::calculate_humidity(i32::from_str_radix(&payload[14..18], 16).unwrap_or(0)),
+            "adcMax" : i32::from_str_radix(&payload[22..26], 16).unwrap_or(0),
+            "adcIn" : i32::from_str_radix(&payload[26..], 16).unwrap_or(0),
+            "bucketedLux": bucketed_lux,
+        })
+    }
+
+    fn rs485_response_payload(payload: &str) -> Value {
+        // TODO: Add Return Temp Calculation
+        let mut data = json!({
+            "data": payload,
+        });
+        let identifier = &payload[0..2];
+        if identifier == "02" {
+            data["co2"] = json!(i32::from_str_radix(&payload[6..10], 16).unwrap());
+            data
+        } else if i32::from_str_radix(identifier, 16).unwrap() >= 0x03 {
+            let actuator_number = i32::from_str_radix(identifier, 16).unwrap();
+            let payload_name = format!("actuator{}", actuator_number);
+            data[payload_name] = json!(i32::from_str_radix(&payload[6..10], 16).unwrap());
+            data
+        } else {
+            data
+        }
+    }
+
+    fn create_rsconfig_payload(payload: &str) -> Value {
+        if payload.len() != 7 {
+            json!({})
+        } else {
+            let baud_rate: i32 = match &payload[0..2] {
+                "00" => 2400,
+                "01" => 4800,
+                "02" => 9600,
+                "03" => 19200,
+                _ => 0,
+            };
+
+            let parity: &str = match &payload[2..4] {
+                "00" => "none",
+                "01" => "odd",
+                "02" => "even",
+                _ => "?",
+            };
+
+            let stop_bits: i32 = match &payload[4..6] {
+                "00" => 1,
+                "01" => 2,
+                _ => -1,
+            };
+
+            let bit_mask: i32 = match &payload[4..6] {
+                "00" => 1,
+                "01" => 2,
+                _ => -1,
+            };
+
+            json!({
+                "baudRate": baud_rate,
+                "parity": parity,
+                "stopBits": stop_bits,
+                "bitMask" : bit_mask
+            })
+        }
+    }
+
+    fn create_th_payload(payload: &str) -> Value {
+        if payload.len() != 8 {
+            println!("Ignoring temperature humidity payload. Expecting length as 8");
+            return json!({});
+        } else {
+            json!({
+                "eventCount": i32::from_str_radix(&payload[2..10], 16).unwrap_or(0),
+                "temperature": Self::calculate_temperature(i32::from_str_radix(&payload[10..14], 16).unwrap_or(0)),
+                "temperatureUnit": "C",
+                "humidity": Self::calculate_humidity(i32::from_str_radix(&payload[14..18], 16).unwrap_or(0)),
+            })
+        }
+    }
+
+    fn create_switch_payload(payload: &str) -> Value {
+        let status = if payload.starts_with("81") {
+            true
+        } else {
+            false
+        };
+
+        if payload.len() == 10 {
+            let event_count = json!(i32::from_str_radix(&payload[2..], 16).unwrap());
+            json!({"eventCount": event_count ,"switch": status } )
+        } else {
+            json!({"switch": status})
+        }
     }
 
     fn create_thadc_payload(payload: &str) -> Value {
         json!({
             "eventCount": i32::from_str_radix(&payload[2..10], 16).unwrap_or(0),
             "temperature": Self::calculate_temperature(i32::from_str_radix(&payload[10..14], 16).unwrap_or(0)),
-            "temperature_unit": "C",
+            "temperatureUnit": "C",
             "humidity": Self::calculate_humidity(i32::from_str_radix(&payload[14..18], 16).unwrap_or(0)),
-            "adcMax" : i32::from_str_radix(&payload[22..26], 10).unwrap_or(0),
-            "adcIn" : i32::from_str_radix(&payload[26..], 10).unwrap_or(0)
+            "adcMax" : i32::from_str_radix(&payload[22..26], 16).unwrap_or(0),
+            "adcIn" : i32::from_str_radix(&payload[26..], 16).unwrap_or(0)
         })
     }
 
