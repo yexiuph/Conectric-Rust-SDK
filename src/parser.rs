@@ -64,7 +64,6 @@ impl ConectricParser {
 
         // TODO!:  Add in memory cache to prevent duplication of data
 
-        // TODO: payload variable would hold a JSON for data outbound
         let mut payload = Self::create_payload(parsable_data);
         let payload_ref = &mut payload;
 
