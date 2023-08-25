@@ -86,55 +86,78 @@ impl ConectricSerial {
     }
 
     pub fn start_gateway(&mut self) {
-        let ports = serialport::available_ports().expect("No USB router found!");
-        let serial_port_name = Self::find_conectric_router(&ports).unwrap();
-
-        match Self::open_serial_port(serial_port_name) {
-            Ok(mut port) => {
-                // Port was opened successfully
-                Self::initialize_conectric_router(&mut port);
-                // Populate the serial_port field
-                self.serial_port = Some(port);
-
-                let mut serial_buf: Vec<u8> = vec![0; 256];
-                let mut line_buffer = String::new();
-                loop {
-                    match self
-                        .serial_port
-                        .as_mut()
-                        .unwrap()
-                        .read(serial_buf.as_mut_slice())
-                    {
-                        Ok(bytes_read) => {
-                            if bytes_read > 0 {
-                                let data = String::from_utf8_lossy(&serial_buf[..bytes_read]);
-                                for c in data.chars() {
-                                    if c == '\n' {
-                                        // Process the complete line
-                                        self.process_data(&line_buffer, self.serial_mac.clone()); // Pass gateway_id
-                                        line_buffer.clear();
-                                    } else {
-                                        line_buffer.push(c);
+        const MAX_RETRIES: usize = 5;
+        let mut retries = 0;
+    
+        loop {
+            match serialport::available_ports() {
+                Ok(ports) => {
+                    if let Some(serial_port_name) = Self::find_conectric_router(&ports) {
+                        match Self::open_serial_port(serial_port_name) {
+                            Ok(mut port) => {
+                                // Port was opened successfully
+                                Self::initialize_conectric_router(&mut port);
+                                // Populate the serial_port field
+                                self.serial_port = Some(port);
+    
+                                let mut serial_buf: Vec<u8> = vec![0; 256];
+                                let mut line_buffer = String::new();
+                                loop {
+                                    match self
+                                        .serial_port
+                                        .as_mut()
+                                        .unwrap()
+                                        .read(serial_buf.as_mut_slice())
+                                    {
+                                        Ok(bytes_read) => {
+                                            if bytes_read > 0 {
+                                                let data = String::from_utf8_lossy(&serial_buf[..bytes_read]);
+                                                for c in data.chars() {
+                                                    if c == '\n' {
+                                                        // Process the complete line
+                                                        self.process_data(&line_buffer, self.serial_mac.clone()); // Pass gateway_id
+                                                        line_buffer.clear();
+                                                    } else {
+                                                        line_buffer.push(c);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Err(_e) => {
+                                            // Ignore read errors
+                                        }
                                     }
                                 }
                             }
+                            Err(err) => match err.kind() {
+                                ErrorKind::Io(_) => {
+                                    eprintln!("Error opening serial port: {:?}", err);
+                                }
+                                ErrorKind::NoDevice => {
+                                    println!("No serial port device found.");
+                                }
+                                _ => {
+                                    eprintln!("Unexpected error opening serial port: {:?}", err);
+                                }
+                            },
                         }
-                        // Ignored
-                        Err(_e) => {}
+                    } else {
+                        println!("No USB router found.");
                     }
                 }
+                Err(err) => {
+                    eprintln!("Error retrieving available ports: {:?}", err);
+                }
             }
-            Err(err) => match err.kind() {
-                ErrorKind::Io(_) => {
-                    panic!("Error opening serial port: {:?}", err);
-                }
-                ErrorKind::NoDevice => {
-                    println!("No serial port device found.");
-                }
-                _ => {
-                    panic!("Unexpected error opening serial port: {:?}", err);
-                }
-            },
+    
+            retries += 1;
+            if retries >= MAX_RETRIES {
+                println!("Max retry attempts reached, giving up.");
+                break; // Exit the loop after max retries
+            }
+    
+            // Wait for a moment before retrying
+            std::thread::sleep(std::time::Duration::from_secs(5));
         }
     }
 }
@@ -149,9 +172,9 @@ mod serial_tests {
         let ports = serialport::available_ports().expect("No ports found!");
         println!("Available ports: {:#?}", ports);
 
-        // let result = ConectricSerial::find_conectric_router(&ports);
-        // println!("Router detection result: {:?}", result);
-        // assert!(result.is_some(), "Expected to find a Conectric router.");
+        let result = ConectricSerial::find_conectric_router(&ports);
+        println!("Router detection result: {:?}", result);
+        assert!(result.is_some(), "Expected to find a Conectric router.");
     }
 
     #[test]
